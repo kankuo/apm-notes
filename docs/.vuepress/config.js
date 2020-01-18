@@ -21,7 +21,7 @@ module.exports = {
   description: 'Application Performance Management Notes',
   author: 'zhangfucheng',
   head: [
-    [ "link", {rel: "icon", href: "/logo.png"}], 
+    [ "link", {rel: "icon", href: "/logo-s.png"}], 
     [ "meta", { "name": "viewport", "content": "width=device-width,initial-scale=1,user-scalable=no" } ]
   ],
   theme: 'reco',
