@@ -26,6 +26,9 @@ module.exports = {
   ],
   theme: 'reco',
   themeConfig: {
+    // 关闭主题颜色选择器
+    themePicker: false,
+    // 关闭腾讯失踪人口的404页面 
     noFoundPageByTencent: false, 
      // 博客配置
     blogConfig: {

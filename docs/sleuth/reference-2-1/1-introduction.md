@@ -5,7 +5,7 @@ date: 2020-01-16
 
 Spring Cloud Sleuth是为[Spring Cloud](https://cloud.spring.io/)实现的一套分布式消息追踪的解决方案。
 
-1.1. 术语
+## 1.1. 术语
 
 Spring Cloud Sleuth基本沿用[Dapper](https://research.google/pubs/pub36356/)的术语。
 
@@ -28,7 +28,7 @@ Span能够被启动和停止，并且自己维护时序信息，一旦创建了S
 
 下图展示了Span和Trace在系统中大概是什么样子，以及Zipkin的annotation:
 
-![](https://raw.githubusercontent.com/spring-cloud/spring-cloud-sleuth/master/docs/src/main/asciidoc/images/trace-id.png)
+![Trace Info propagation](https://raw.githubusercontent.com/spring-cloud/spring-cloud-sleuth/master/docs/src/main/asciidoc/images/trace-id.png)
 
 每个颜色就代表一个span （总共有A-G 7个span）。看一下这个标注：
 
@@ -36,187 +36,208 @@ Span能够被启动和停止，并且自己维护时序信息，一旦创建了S
     Span Id = D
     Client Sent
 
-This note indicates that the current span has Trace Id set to X and Span Id set to D. Also, the Client Sent event took place.
+这就是说traceId是X，spanId是D，当前状态是Client端向服务端发送请求。
 
-The following image shows how parent-child relationships of spans look:
+下图展示了span之间的父子关系大概是个什么样子：
 
-Parent child relationship
-1.2. Purpose
+![Parent child relationship](https://raw.githubusercontent.com/spring-cloud/spring-cloud-sleuth/master/docs/src/main/asciidoc/images/parents.png)
 
-The following sections refer to the example shown in the preceding image.
+## 1.2. 目标
 
-1.2.1. Distributed Tracing with Zipkin
+以下各部分使用前面图中展示的调用关系为例（只看和RPC相关的几个，也就是去掉C、E、G三个span）。
 
-This example has seven spans. If you go to traces in Zipkin, you can see this number in the second trace, as shown in the following image:
+### 1.2.1. 和Zipkin集成做分布式追踪
 
-Traces
-However, if you pick a particular trace, you can see four spans, as shown in the following image:
+如果集成zipkin到zipkin的UI去看，能看到下图的样子，这里面有两个trace，按时间倒序排列的，先有一个成功的调用，有7个span，还有一个失败的调用，这个失败的调用总共收到6个span的上报：
 
-Traces Info propagation
-When you pick a particular trace, you see merged spans. That means that, if there were two spans sent to Zipkin with Server Received and Server Sent or Client Received and Client Sent annotations, they are presented as a single span.
-Why is there a difference between the seven and four spans in this case?
+![Traces](https://raw.githubusercontent.com/spring-cloud/spring-cloud-sleuth/master/docs/src/main/asciidoc/images/zipkin-traces.png)
 
-One span comes from the http:/start span. It has the Server Received (sr) and Server Sent (ss) annotations.
+这7个span分别是：
 
-Two spans come from the RPC call from service1 to service2 to the http:/foo endpoint. The Client Sent (cs) and Client Received (cr) events took place on the service1 side. Server Received (sr) and Server Sent (ss) events took place on the service2 side. These two spans form one logical span related to an RPC call.
+1. `service1`上报的`SpanId=A`的span，标注为`sr`和`ss`
+2. `service1`上报的`SpanId=B`的span，标注为`cs`和`cr`
+3. `service2`上报的`SpanId=B`的span，标注为`sr`和`ss`
+4. `service2`上报的`SpanId=D`的span，标注为`cs`和`cr`
+5. `service3`上报的`SpanId=D`的span，标注为`sr`和`ss`
+6. `service2`上报的`SpanId=F`的span，标注为`cs`和`cr`
+7. `service4`上报的`SpanId=F`的span，标注为`sr`和`ss`
 
-Two spans come from the RPC call from service2 to service3 to the http:/bar endpoint. The Client Sent (cs) and Client Received (cr) events took place on the service2 side. The Server Received (sr) and Server Sent (ss) events took place on the service3 side. These two spans form one logical span related to an RPC call.
+如果点进具体的trace，会发现只有4个span：
 
-Two spans come from the RPC call from service2 to service4 to the http:/baz endpoint. The Client Sent (cs) and Client Received (cr) events took place on the service2 side. Server Received (sr) and Server Sent (ss) events took place on the service4 side. These two spans form one logical span related to an RPC call.
+![Traces Info propagation](https://raw.githubusercontent.com/spring-cloud/spring-cloud-sleuth/master/docs/src/main/asciidoc/images/zipkin-ui.png)
 
-So, if we count the physical spans, we have one from http:/start, two from service1 calling service2, two from service2 calling service3, and two from service2 calling service4. In sum, we have a total of seven spans.
+::: tip
+打开具体的trace，看到的是合并之后的span，发送给zipkin的两个span，一个有`sr`（Server Received）和`ss`（Server Sent），一个有`cr`（Client Received）和`cs`（Client Sent），那么他们会被认为是同一个span。
+:::
 
-Logically, we see the information of four total Spans because we have one span related to the incoming request to service1 and three spans related to RPC calls.
+具体来看，在这种情况下，为什么有7个span和4个span的区别。
 
-1.2.2. Visualizing errors
+* 一个span来自`http:/start`的span。它具有服务器已接收（`sr`）和服务器已发送（`ss`）两个标注；
+* 从`service1`到`service2` `http:/foo`接口的RPC调用产生了两个span。客户端已发送（`cs`）和客户端已接收（`cr`）在`service1`端发生。服务器已接收（`sr`）和服务器已发送（`ss`）在`service2`端发生。这两个span形成了与RPC调用相关的单个逻辑span；
+* 从`service2`到`service3` `http:/bar`接口的RPC调用产生了两个span。客户端已发送（`cs`）和客户端已接收（`cr`）在`service2`端发生。服务器已接收（`sr`）和服务器已发送（`ss`）在`service3`端发生。这两个span形成了与RPC调用相关的单个逻辑span；
+* 从`service2`到`service4` `http:/baz`接口的RPC调用产生了两个span。客户端已发送（`cs`）和客户端已接收（`cr`）在`service2`端发生。服务器已接收（`sr`）和服务器已发送（`ss`）在`service4`端发生。这两个span形成了与RPC调用相关的单个逻辑span；
 
-Zipkin lets you visualize errors in your trace. When an exception was thrown and was not caught, we set proper tags on the span, which Zipkin can then properly colorize. You could see in the list of traces one trace that is red. That appears because an exception was thrown.
+因此，如果我们计算物理span，则有一个来自`http:/start`，两个来自`service1`调用`service2`，两个来自`service2`调用`service3`，以及两个来自`service2`调用`service4`。这样就有7个span。
 
-If you click that trace, you see a similar picture, as follows:
+从逻辑上说，只有4个span，有一个span与对`service1`的传入请求有关，三个与RPC调用有关。
 
-Error Traces
-If you then click on one of the spans, you see the following
+### 1.2.2. 可视化的错误
 
-Error Traces Info propagation
-The span shows the reason for the error and the whole stack trace related to it.
+通过Zipkin可以看到trace中的错误。当出现了没有被catch的异常，sleuth会在span上设置合适的tag，让Zipkin能够用不同的颜色来展示。例如`service4`挂掉了，就会出现前面图中展示的红色的trace。
 
-1.2.3. Distributed Tracing with Brave
+点开trace详情，可以看到类似这样的界面：
 
-Starting with version 2.0.0, Spring Cloud Sleuth uses Brave as the tracing library. Consequently, Sleuth no longer takes care of storing the context but delegates that work to Brave.
+![Error Traces](https://raw.githubusercontent.com/spring-cloud/spring-cloud-sleuth/master/docs/src/main/asciidoc/images/zipkin-error-traces.png)
 
-Due to the fact that Sleuth had different naming and tagging conventions than Brave, we decided to follow Brave’s conventions from now on. However, if you want to use the legacy Sleuth approaches, you can set the spring.sleuth.http.legacy.enabled property to true.
+点击一个红色的span，例如`service2`，会看到：
 
-1.2.4. Live examples
+![Error Traces Info propagation](https://raw.githubusercontent.com/spring-cloud/spring-cloud-sleuth/master/docs/src/main/asciidoc/images/zipkin-error-trace-screenshot.png)
 
-Zipkin deployed on Pivotal Web Services
-Click the Pivotal Web Services icon to see it live!Click the Pivotal Web Services icon to see it live!
-Click here to see it live!
+这里会展示出错原因和全部的trace栈。注意`service2`调用`service4`出现了未捕获的异常，但`service2`响应`service1`的`ss`还是会有，这条trace是6个span而不是7个，是因为`service4`挂掉了，相关的`sr`和`ss`没有上报。
 
-The dependency graph in Zipkin should resemble the following image:
+### 1.2.3. 利用Brave做分布式追踪
 
-Dependencies
-Zipkin deployed on Pivotal Web Services
-Click the Pivotal Web Services icon to see it live!Click the Pivotal Web Services icon to see it live!
-Click here to see it live!
+`2.0.0`版本开始, `Spring Cloud Sleuth`使用[Brave](https://github.com/openzipkin/brave)作为追踪库，同时，`Sleuth`也不再关心trace context的维护，一律委托给Brave。
 
-1.2.5. Log correlation
+由于Sleuth有和Brave不同的命名和tag约定，以后会逐渐follow Brave的约定，如果还想按照以前Sleuth的方法用，可以设置`spring.sleuth.http.legacy.enabled=true`。
 
-When using grep to read the logs of those four applications by scanning for a trace ID equal to (for example) 2485ec27856c56f4, you get output resembling the following:
+### 1.2.4. 在线演示
 
-service1.log:2016-02-26 11:15:47.561  INFO [service1,2485ec27856c56f4,2485ec27856c56f4,true] 68058 --- [nio-8081-exec-1] i.s.c.sleuth.docs.service1.Application   : Hello from service1. Calling service2
-service2.log:2016-02-26 11:15:47.710  INFO [service2,2485ec27856c56f4,9aa10ee6fbde75fa,true] 68059 --- [nio-8082-exec-1] i.s.c.sleuth.docs.service2.Application   : Hello from service2. Calling service3 and then service4
-service3.log:2016-02-26 11:15:47.895  INFO [service3,2485ec27856c56f4,1210be13194bfe5,true] 68060 --- [nio-8083-exec-1] i.s.c.sleuth.docs.service3.Application   : Hello from service3
-service2.log:2016-02-26 11:15:47.924  INFO [service2,2485ec27856c56f4,9aa10ee6fbde75fa,true] 68059 --- [nio-8082-exec-1] i.s.c.sleuth.docs.service2.Application   : Got response from service3 [Hello from service3]
-service4.log:2016-02-26 11:15:48.134  INFO [service4,2485ec27856c56f4,1b1845262ffba49d,true] 68061 --- [nio-8084-exec-1] i.s.c.sleuth.docs.service4.Application   : Hello from service4
-service2.log:2016-02-26 11:15:48.156  INFO [service2,2485ec27856c56f4,9aa10ee6fbde75fa,true] 68059 --- [nio-8082-exec-1] i.s.c.sleuth.docs.service2.Application   : Got response from service4 [Hello from service4]
-service1.log:2016-02-26 11:15:48.182  INFO [service1,2485ec27856c56f4,2485ec27856c56f4,true] 68058 --- [nio-8081-exec-1] i.s.c.sleuth.docs.service1.Application   : Got response from service2 [Hello from service2, response from service3 [Hello from service3] and from service4 [Hello from service4]]
-If you use a log aggregating tool (such as Kibana, Splunk, and others), you can order the events that took place. An example from Kibana would resemble the following image:
+[在线演示](https://docssleuth-zipkin-server.cfapps.io/zipkin/)
 
-Log correlation with Kibana
-If you want to use Logstash, the following listing shows the Grok pattern for Logstash:
+笔者注：这个在线演示我没闹明白怎么用，好像只是放了一个zipkin的界面，没有调用的记录，我后面会自己搭一个，如果这里还没有更新，联系`zhfchdev@gmail.com`。
 
-filter {
-       # pattern matching logback pattern
-       grok {
-              match => { "message" => "%{TIMESTAMP_ISO8601:timestamp}\s+%{LOGLEVEL:severity}\s+\[%{DATA:service},%{DATA:trace},%{DATA:span},%{DATA:exportable}\]\s+%{DATA:pid}\s+---\s+\[%{DATA:thread}\]\s+%{DATA:class}\s+:\s+%{GREEDYDATA:rest}" }
-       }
-}
-If you want to use Grok together with the logs from Cloud Foundry, you have to use the following pattern:
-filter {
-       # pattern matching logback pattern
-       grok {
-              match => { "message" => "(?m)OUT\s+%{TIMESTAMP_ISO8601:timestamp}\s+%{LOGLEVEL:severity}\s+\[%{DATA:service},%{DATA:trace},%{DATA:span},%{DATA:exportable}\]\s+%{DATA:pid}\s+---\s+\[%{DATA:thread}\]\s+%{DATA:class}\s+:\s+%{GREEDYDATA:rest}" }
-       }
-}
-JSON Logback with Logstash
-Often, you do not want to store your logs in a text file but in a JSON file that Logstash can immediately pick. To do so, you have to do the following (for readability, we pass the dependencies in the groupId:artifactId:version notation).
+在Zipkin可以看到组装之后的服务依赖图：
 
-Dependencies Setup
+![Dependencies](https://raw.githubusercontent.com/spring-cloud/spring-cloud-sleuth/master/docs/src/main/asciidoc/images/dependencies.png)
 
-Ensure that Logback is on the classpath (ch.qos.logback:logback-core).
+### 1.2.5. 日志关联
 
-Add Logstash Logback encode. For example, to use version 4.6, add net.logstash.logback:logstash-logback-encoder:4.6.
+按照traceId去grep这4个服务的日志，可以看到这样的输出:
 
-Logback Setup
+    service1.log:2016-02-26 11:15:47.561  INFO [service1,2485ec27856c56f4,2485ec27856c56f4,true] 68058 --- [nio-8081-exec-1] i.s.c.sleuth.docs.service1.Application   : Hello from service1. Calling service2
+    service2.log:2016-02-26 11:15:47.710  INFO [service2,2485ec27856c56f4,9aa10ee6fbde75fa,true] 68059 --- [nio-8082-exec-1] i.s.c.sleuth.docs.service2.Application   : Hello from service2. Calling service3 and then service4
+    service3.log:2016-02-26 11:15:47.895  INFO [service3,2485ec27856c56f4,1210be13194bfe5,true] 68060 --- [nio-8083-exec-1] i.s.c.sleuth.docs.service3.Application   : Hello from service3
+    service2.log:2016-02-26 11:15:47.924  INFO [service2,2485ec27856c56f4,9aa10ee6fbde75fa,true] 68059 --- [nio-8082-exec-1] i.s.c.sleuth.docs.service2.Application   : Got response from service3 [Hello from service3]
+    service4.log:2016-02-26 11:15:48.134  INFO [service4,2485ec27856c56f4,1b1845262ffba49d,true] 68061 --- [nio-8084-exec-1] i.s.c.sleuth.docs.service4.Application   : Hello from service4
+    service2.log:2016-02-26 11:15:48.156  INFO [service2,2485ec27856c56f4,9aa10ee6fbde75fa,true] 68059 --- [nio-8082-exec-1] i.s.c.sleuth.docs.service2.Application   : Got response from service4 [Hello from service4]
+    service1.log:2016-02-26 11:15:48.182  INFO [service1,2485ec27856c56f4,2485ec27856c56f4,true] 68058 --- [nio-8081-exec-1] i.s.c.sleuth.docs.service1.Application   : Got response from service2 [Hello from service2, response from service3 [Hello from service3] and from service4 [Hello from service4]]
 
-Consider the following example of a Logback configuration file (named logback-spring.xml).
+如果有类似于Kibana或Splunk的日志聚合工具，能够按照事件发生顺序排序，下面是一个用Kibana的例子：
 
-<?xml version="1.0" encoding="UTF-8"?>
-<configuration>
-    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
-    ​
-    <springProperty scope="context" name="springAppName" source="spring.application.name"/>
-    <!-- Example for logging into the build folder of your project -->
-    <property name="LOG_FILE" value="${BUILD_FOLDER:-build}/${springAppName}"/>​
+![Log correlation with Kibana](https://raw.githubusercontent.com/spring-cloud/spring-cloud-sleuth/master/docs/src/main/asciidoc/images/kibana.png)
 
-    <!-- You can override this to have a custom pattern -->
-    <property name="CONSOLE_LOG_PATTERN"
-              value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+想用Logstash的话，下面是Grok的pattern：
 
-    <!-- Appender to log to console -->
-    <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
-        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-            <!-- Minimum logging level to be presented in the console logs-->
-            <level>DEBUG</level>
-        </filter>
-        <encoder>
-            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
-            <charset>utf8</charset>
-        </encoder>
-    </appender>
+    filter {
+        # pattern matching logback pattern
+        grok {
+            match => { "message" => "%{TIMESTAMP_ISO8601:timestamp}\s+%{LOGLEVEL:severity}\s+\[%{DATA:service},%{DATA:trace},%{DATA:span},%{DATA:exportable}\]\s+%{DATA:pid}\s+---\s+\[%{DATA:thread}\]\s+%{DATA:class}\s+:\s+%{GREEDYDATA:rest}" }
+        }
+    }
 
-    <!-- Appender to log to file -->​
-    <appender name="flatfile" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${LOG_FILE}</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${LOG_FILE}.%d{yyyy-MM-dd}.gz</fileNamePattern>
-            <maxHistory>7</maxHistory>
-        </rollingPolicy>
-        <encoder>
-            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
-            <charset>utf8</charset>
-        </encoder>
-    </appender>
-    ​
-    <!-- Appender to log to file in a JSON format -->
-    <appender name="logstash" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>${LOG_FILE}.json</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>${LOG_FILE}.json.%d{yyyy-MM-dd}.gz</fileNamePattern>
-            <maxHistory>7</maxHistory>
-        </rollingPolicy>
-        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
-            <providers>
-                <timestamp>
-                    <timeZone>UTC</timeZone>
-                </timestamp>
-                <pattern>
+::: tip
+如果想用Grok处理从Cloud Foundry拿到的日志，应该用下面的pattern：
+:::
+
+    filter {
+        # pattern matching logback pattern
+        grok {
+            match => { "message" => "(?m)OUT\s+%{TIMESTAMP_ISO8601:timestamp}\s+%{LOGLEVEL:severity}\s+\[%{DATA:service},%{DATA:trace},%{DATA:span},%{DATA:exportable}\]\s+%{DATA:pid}\s+---\s+\[%{DATA:thread}\]\s+%{DATA:class}\s+:\s+%{GREEDYDATA:rest}" }
+        }
+    }
+
+#### JSON Logback with Logstash
+
+上面的日志是以文本形式输出到日志文件的，如果想保存成json文件，方便logstash收集，可以按照下面的步骤来：
+
+##### 添加依赖
+
+确保项目里依赖了Logback（`ch.qos.logback:logback-core`）。
+
+添加`logstash-logback-encoder`，例如`4.6`版额：`net.logstash.logback:logstash-logback-encoder:4.6`。
+
+##### 配置Logback
+
+这是一个Logback配置文件的例子（在[logback-spring.xml](https://github.com/spring-cloud-samples/sleuth-documentation-apps/blob/master/service1/src/main/resources/logback-spring.xml)）。
+
+    <?xml version="1.0" encoding="UTF-8"?>
+    <configuration>
+        <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+        ​
+        <springProperty scope="context" name="springAppName" source="spring.application.name"/>
+        <!-- Example for logging into the build folder of your project -->
+        <property name="LOG_FILE" value="${BUILD_FOLDER:-build}/${springAppName}"/>​
+
+        <!-- You can override this to have a custom pattern -->
+        <property name="CONSOLE_LOG_PATTERN"
+                  value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}) %clr(${PID:- }){magenta} %clr(---){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+
+        <!-- Appender to log to console -->
+        <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+                <!-- Minimum logging level to be presented in the console logs-->
+                <level>DEBUG</level>
+            </filter>
+            <encoder>
+                <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+                <charset>utf8</charset>
+            </encoder>
+        </appender>
+
+        <!-- Appender to log to file -->​
+        <appender name="flatfile" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${LOG_FILE}</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_FILE}.%d{yyyy-MM-dd}.gz</fileNamePattern>
+                <maxHistory>7</maxHistory>
+            </rollingPolicy>
+            <encoder>
+                <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+                <charset>utf8</charset>
+            </encoder>
+        </appender>
+        ​
+        <!-- Appender to log to file in a JSON format -->
+        <appender name="logstash" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${LOG_FILE}.json</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_FILE}.json.%d{yyyy-MM-dd}.gz</fileNamePattern>
+                <maxHistory>7</maxHistory>
+            </rollingPolicy>
+            <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+                <providers>
+                    <timestamp>
+                        <timeZone>UTC</timeZone>
+                    </timestamp>
                     <pattern>
-                        {
-                        "severity": "%level",
-                        "service": "${springAppName:-}",
-                        "trace": "%X{X-B3-TraceId:-}",
-                        "span": "%X{X-B3-SpanId:-}",
-                        "parent": "%X{X-B3-ParentSpanId:-}",
-                        "exportable": "%X{X-Span-Export:-}",
-                        "pid": "${PID:-}",
-                        "thread": "%thread",
-                        "class": "%logger{40}",
-                        "rest": "%message"
-                        }
+                        <pattern>
+                            {
+                            "severity": "%level",
+                            "service": "${springAppName:-}",
+                            "trace": "%X{X-B3-TraceId:-}",
+                            "span": "%X{X-B3-SpanId:-}",
+                            "parent": "%X{X-B3-ParentSpanId:-}",
+                            "exportable": "%X{X-Span-Export:-}",
+                            "pid": "${PID:-}",
+                            "thread": "%thread",
+                            "class": "%logger{40}",
+                            "rest": "%message"
+                            }
+                        </pattern>
                     </pattern>
-                </pattern>
-            </providers>
-        </encoder>
-    </appender>
-    ​
-    <root level="INFO">
-        <appender-ref ref="console"/>
-        <!-- uncomment this to have also JSON logs -->
-        <!--<appender-ref ref="logstash"/>-->
-        <!--<appender-ref ref="flatfile"/>-->
-    </root>
-</configuration>
+                </providers>
+            </encoder>
+        </appender>
+        ​
+        <root level="INFO">
+            <appender-ref ref="console"/>
+            <!-- uncomment this to have also JSON logs -->
+            <!--<appender-ref ref="logstash"/>-->
+            <!--<appender-ref ref="flatfile"/>-->
+        </root>
+    </configuration>
+
 That Logback configuration file:
 
 Logs information from the application in a JSON format to a build/${spring.application.name}.json file.
@@ -225,43 +246,61 @@ Has commented out two additional appenders: console and standard log file.
 
 Has the same logging pattern as the one presented in the previous section.
 
+::: tips
 If you use a custom logback-spring.xml, you must pass the spring.application.name in the bootstrap rather than the application property file. Otherwise, your custom logback file does not properly read the property.
+:::
+
 1.2.6. Propagating Span Context
 
 The span context is the state that must get propagated to any child spans across process boundaries. Part of the Span Context is the Baggage. The trace and span IDs are a required part of the span context. Baggage is an optional part.
 
 Baggage is a set of key:value pairs stored in the span context. Baggage travels together with the trace and is attached to every span. Spring Cloud Sleuth understands that a header is baggage-related if the HTTP header is prefixed with baggage- and, for messaging, it starts with baggage_.
 
+::: warning
 There is currently no limitation of the count or size of baggage items. However, keep in mind that too many can decrease system throughput or increase RPC latency. In extreme cases, too much baggage can crash the application, due to exceeding transport-level message or header capacity.
+:::
+
 The following example shows setting baggage on a span:
 
-Span initialSpan = this.tracer.nextSpan().name("span").start();
-ExtraFieldPropagation.set(initialSpan.context(), "foo", "bar");
-ExtraFieldPropagation.set(initialSpan.context(), "UPPER_CASE", "someValue");
-Baggage versus Span Tags
+    Span initialSpan = this.tracer.nextSpan().name("span").start();
+    ExtraFieldPropagation.set(initialSpan.context(), "foo", "bar");
+    ExtraFieldPropagation.set(initialSpan.context(), "UPPER_CASE", "someValue");
+
+##### Baggage versus Span Tags
 Baggage travels with the trace (every child span contains the baggage of its parent). Zipkin has no knowledge of baggage and does not receive that information.
 
+
+::: warning
 Starting from Sleuth 2.0.0 you have to pass the baggage key names explicitly in your project configuration. Read more about that setup here
+:::
+
 Tags are attached to a specific span. In other words, they are presented only for that particular span. However, you can search by tag to find the trace, assuming a span having the searched tag value exists.
 
 If you want to be able to lookup a span based on baggage, you should add a corresponding entry as a tag in the root span.
 
+::: warning
 The span must be in scope.
+:::
+
 The following listing shows integration tests that use baggage:
 
 The setup
-spring.sleuth:
-  baggage-keys:
-    - baz
-    - bizarrecase
-  propagation-keys:
-    - foo
-    - upper_case
+
+    spring.sleuth:
+      baggage-keys:
+        - baz
+        - bizarrecase
+      propagation-keys:
+        - foo
+        - upper_case
+
 The code
-initialSpan.tag("foo",
-        ExtraFieldPropagation.get(initialSpan.context(), "foo"));
-initialSpan.tag("UPPER_CASE",
-        ExtraFieldPropagation.get(initialSpan.context(), "UPPER_CASE"));
+
+    initialSpan.tag("foo",
+            ExtraFieldPropagation.get(initialSpan.context(), "foo"));
+    initialSpan.tag("UPPER_CASE",
+            ExtraFieldPropagation.get(initialSpan.context(), "UPPER_CASE"));
+
 1.3. Adding Sleuth to the Project
 
 This section addresses how to add Sleuth to your project with either Maven or Gradle.
@@ -333,27 +372,42 @@ If you want Sleuth over RabbitMQ, add the spring-cloud-starter-zipkin and spring
 
 The following example shows how to do so for Gradle:
 
-MavenGradle
-<dependencyManagement> 
-      <dependencies>
-          <dependency>
-              <groupId>org.springframework.cloud</groupId>
-              <artifactId>spring-cloud-dependencies</artifactId>
-              <version>${release.train.version}</version>
-              <type>pom</type>
-              <scope>import</scope>
-          </dependency>
-      </dependencies>
-</dependencyManagement>
+Maven
 
-<dependency> 
-    <groupId>org.springframework.cloud</groupId>
-    <artifactId>spring-cloud-starter-zipkin</artifactId>
-</dependency>
-<dependency> 
-    <groupId>org.springframework.amqp</groupId>
-    <artifactId>spring-rabbit</artifactId>
-</dependency>
+    <dependencyManagement>  <!-- 1 -->
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${release.train.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependency>  <!-- 2 -->
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-starter-zipkin</artifactId>
+    </dependency>
+    <dependency>  <!-- 3 -->
+        <groupId>org.springframework.amqp</groupId>
+        <artifactId>spring-rabbit</artifactId>
+    </dependency>
+
+Gradle
+
+    dependencyManagement {  // 1
+        imports {
+            mavenBom "org.springframework.cloud:spring-cloud-dependencies:${releaseTrainVersion}"
+        }
+    }
+
+    dependencies {
+        compile "org.springframework.cloud:spring-cloud-starter-zipkin"  // 2
+        compile "org.springframework.amqp:spring-rabbit"   // 3
+    }
+
 We recommend that you add the dependency management through the Spring BOM so that you need not manage versions yourself.
 Add the dependency to spring-cloud-starter-zipkin. That way, all nested dependencies get downloaded.
 To automatically configure RabbitMQ, add the spring-rabbit dependency.
@@ -361,48 +415,48 @@ To automatically configure RabbitMQ, add the spring-rabbit dependency.
 
 Spring Cloud Sleuth supports sending traces to multiple tracing systems as of version 2.1.0. In order to get this to work, every tracing system needs to have a Reporter<Span> and Sender. If you want to override the provided beans you need to give them a specific name. To do this you can use respectively ZipkinAutoConfiguration.REPORTER_BEAN_NAME and ZipkinAutoConfiguration.SENDER_BEAN_NAME.
 
-@Configuration
-protected static class MyConfig {
+    @Configuration
+    protected static class MyConfig {
 
-    @Bean(ZipkinAutoConfiguration.REPORTER_BEAN_NAME)
-    Reporter<zipkin2.Span> myReporter() {
-        return AsyncReporter.create(mySender());
+        @Bean(ZipkinAutoConfiguration.REPORTER_BEAN_NAME)
+        Reporter<zipkin2.Span> myReporter() {
+            return AsyncReporter.create(mySender());
+        }
+
+        @Bean(ZipkinAutoConfiguration.SENDER_BEAN_NAME)
+        MySender mySender() {
+            return new MySender();
+        }
+
+        static class MySender extends Sender {
+
+            private boolean spanSent = false;
+
+            boolean isSpanSent() {
+                return this.spanSent;
+            }
+
+            @Override
+            public Encoding encoding() {
+                return Encoding.JSON;
+            }
+
+            @Override
+            public int messageMaxBytes() {
+                return Integer.MAX_VALUE;
+            }
+
+            @Override
+            public int messageSizeInBytes(List<byte[]> encodedSpans) {
+                return encoding().listSizeInBytes(encodedSpans);
+            }
+
+            @Override
+            public Call<Void> sendSpans(List<byte[]> encodedSpans) {
+                this.spanSent = true;
+                return Call.create(null);
+            }
+
+        }
+
     }
-
-    @Bean(ZipkinAutoConfiguration.SENDER_BEAN_NAME)
-    MySender mySender() {
-        return new MySender();
-    }
-
-    static class MySender extends Sender {
-
-        private boolean spanSent = false;
-
-        boolean isSpanSent() {
-            return this.spanSent;
-        }
-
-        @Override
-        public Encoding encoding() {
-            return Encoding.JSON;
-        }
-
-        @Override
-        public int messageMaxBytes() {
-            return Integer.MAX_VALUE;
-        }
-
-        @Override
-        public int messageSizeInBytes(List<byte[]> encodedSpans) {
-            return encoding().listSizeInBytes(encodedSpans);
-        }
-
-        @Override
-        public Call<Void> sendSpans(List<byte[]> encodedSpans) {
-            this.spanSent = true;
-            return Call.create(null);
-        }
-
-    }
-
-}
